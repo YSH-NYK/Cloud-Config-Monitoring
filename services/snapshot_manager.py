@@ -25,15 +25,7 @@ class SnapshotManager:
         """
         self.snapshots_dir = snapshots_dir
         self.logger = logger or logging.getLogger(__name__)
-        self._ensure_directories()
-    
-    def _ensure_directories(self) -> None:
-        """Ensure snapshot directories exist."""
-        service_types = ['cos', 'iam', 'vpc', 'vsi', 'security']
-        for service_type in service_types:
-            service_dir = os.path.join(self.snapshots_dir, service_type)
-            Path(service_dir).mkdir(parents=True, exist_ok=True)
-        self.logger.debug(f"Snapshot directories initialized at {self.snapshots_dir}")
+        # Removed directory creation - using database-only storage
     
     def save_snapshot(
         self,

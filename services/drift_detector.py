@@ -25,12 +25,7 @@ class DriftDetector:
         """
         self.drift_reports_dir = drift_reports_dir
         self.logger = logger or logging.getLogger(__name__)
-        self._ensure_directories()
-    
-    def _ensure_directories(self) -> None:
-        """Ensure drift report directories exist."""
-        Path(self.drift_reports_dir).mkdir(parents=True, exist_ok=True)
-        self.logger.debug(f"Drift reports directory initialized at {self.drift_reports_dir}")
+        # Removed directory creation - using database-only storage
     
     def detect_drift(
         self,
