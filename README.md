@@ -1,8 +1,4 @@
-# IBM Cloud Configuration Monitor
-
-A comprehensive Python-based system for monitoring IBM Cloud infrastructure configurations and detecting configuration drift over time.
-
-## Features
+# Features
 
 ### Core Capabilities
 - **Multi-Service Collection**: Collects configurations from COS, IAM, VPC, VSI, and Security services
@@ -49,9 +45,8 @@ project/
 ## Installation
 
 ### Prerequisites
-- Python 3.8 or higher
-- IBM Cloud account with API key
-- PostgreSQL database (recommended for production use)
+- IBM Cloud account with API key (refer to IBM_CLOUD_CREDENTIALS_GUIDE to get these)
+- PostgreSQL database
 
 ### Setup
 
@@ -257,40 +252,6 @@ Example drift report:
   }
 }
 ```
-
-## Querying Data
-
-### Using psql
-
-```bash
-# Connect to database
-psql -U ibm_monitor -d ibm_config_monitor
-
-# View recent snapshots
-SELECT service_type, timestamp, resource_count
-FROM snapshots
-ORDER BY timestamp DESC
-LIMIT 10;
-
-# View drift reports with changes
-SELECT service_type, detection_timestamp, total_changes, has_drift
-FROM drift_reports
-WHERE has_drift = true
-ORDER BY detection_timestamp DESC;
-
-# Query specific service snapshots
-SELECT * FROM snapshots
-WHERE service_type = 'cos'
-ORDER BY timestamp DESC
-LIMIT 5;
-```
-
-### Using pgAdmin
-
-1. Connect to `ibm_config_monitor` database
-2. Browse tables: `snapshots`, `drift_reports`
-3. Use Query Tool for custom queries
-4. View JSONB data in formatted view
 
 ## Logging
 
