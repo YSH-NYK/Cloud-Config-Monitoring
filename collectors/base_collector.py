@@ -84,4 +84,4 @@ class BaseCollector(ABC):
         error_msg += f": {str(error)}"
         self.logger.error(error_msg, exc_info=True)
 
-# Made with Bob
+

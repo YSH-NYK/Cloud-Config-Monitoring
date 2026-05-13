@@ -117,4 +117,4 @@ class VSICollector(BaseCollector):
         
         return resources
 
-# Made with Bob
+

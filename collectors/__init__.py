@@ -16,4 +16,4 @@ __all__ = [
     'SecurityCollector'
 ]
 
-# Made with Bob
+

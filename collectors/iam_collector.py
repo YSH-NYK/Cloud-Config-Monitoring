@@ -192,4 +192,4 @@ class IAMCollector(BaseCollector):
         
         return resources
 
-# Made with Bob
+

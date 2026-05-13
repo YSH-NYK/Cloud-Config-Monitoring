@@ -66,4 +66,4 @@ class Settings:
 # Global settings instance
 settings = Settings()
 
-# Made with Bob
+

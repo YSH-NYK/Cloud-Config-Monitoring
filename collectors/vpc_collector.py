@@ -263,4 +263,4 @@ class VPCCollector(BaseCollector):
         
         return resources
 
-# Made with Bob
+

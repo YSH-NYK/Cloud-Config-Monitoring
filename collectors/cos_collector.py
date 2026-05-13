@@ -142,4 +142,4 @@ class COSCollector(BaseCollector):
         
         return config
 
-# Made with Bob
+

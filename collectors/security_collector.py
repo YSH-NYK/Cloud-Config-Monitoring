@@ -230,4 +230,4 @@ class SecurityCollector(BaseCollector):
         
         return False
 
-# Made with Bob
+
