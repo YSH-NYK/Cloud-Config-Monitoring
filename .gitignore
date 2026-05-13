@@ -45,10 +45,17 @@ env/
 # Logs
 logs/
 *.log
+!logs/.gitkeep
 
 # Output files
 output/
 *.json
+!snapshots/**/.gitkeep
+!drift_reports/.gitkeep
+
+# Snapshots (keep structure, ignore content)
+snapshots/**/*.json
+drift_reports/**/*.json
 
 # Testing
 .pytest_cache/

@@ -1,18 +1,29 @@
 #!/usr/bin/env python3
 """
-IBM Cloud Configuration Collector
+IBM Cloud Infrastructure Monitoring and Configuration Drift Detection System
 
-This script collects infrastructure configuration details from IBM Cloud
-and stores them as structured JSON files.
+This application collects infrastructure configuration details from IBM Cloud,
+stores snapshots, and detects configuration drift over time.
+
+Supports two modes:
+1. One-time collection mode (default)
+2. Continuous monitoring mode (with --monitor flag)
 """
 
 import sys
-import asyncio
-from typing import List, Dict, Any
+import signal
+import time
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from config import Settings
-from services import IBMCloudClient
+from services import (
+    IBMCloudClient,
+    SnapshotManager,
+    DriftDetector,
+    SchedulerService,
+    DatabaseService
+)
 from collectors import (
     COSCollector,
     IAMCollector,
@@ -23,11 +34,11 @@ from collectors import (
 from utils import setup_logger, save_json
 
 
-class IBMCloudConfigCollector:
-    """Main collector orchestrator for IBM Cloud configurations."""
+class IBMCloudMonitor:
+    """Main orchestrator for IBM Cloud infrastructure monitoring and drift detection."""
     
     def __init__(self):
-        """Initialize the collector."""
+        """Initialize the monitor."""
         # Load settings
         self.settings = Settings()
         
@@ -52,7 +63,33 @@ class IBMCloudConfigCollector:
             logger=self.logger
         )
         
-        self.logger.info("IBM Cloud Configuration Collector initialized")
+        # Initialize snapshot manager
+        self.snapshot_manager = SnapshotManager(
+            snapshots_dir=self.settings.snapshots_dir,
+            logger=self.logger
+        )
+        
+        # Initialize drift detector
+        self.drift_detector = DriftDetector(
+            drift_reports_dir=self.settings.drift_reports_dir,
+            logger=self.logger
+        )
+        
+        # Initialize database service (optional)
+        self.db_service = None
+        if self.settings.enable_database and self.settings.database_url:
+            self.db_service = DatabaseService(
+                database_url=self.settings.database_url,
+                logger=self.logger
+            )
+            if self.db_service.enabled:
+                self.logger.info("Database persistence enabled")
+        
+        # Initialize scheduler (for monitoring mode)
+        self.scheduler = None
+        self.monitoring_active = False
+        
+        self.logger.info("IBM Cloud Monitor initialized")
     
     def test_connection(self) -> bool:
         """
@@ -64,6 +101,131 @@ class IBMCloudConfigCollector:
         self.logger.info("Testing connection to IBM Cloud...")
         return self.client.test_connection()
     
+    def collect_service(
+        self,
+        service_type: str,
+        save_snapshot: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Collect configurations for a specific service type.
+        
+        Args:
+            service_type: Type of service (cos, iam, vpc, vsi, security)
+            save_snapshot: Whether to save snapshot
+            
+        Returns:
+            List of collected resources
+        """
+        self.logger.info(f"Collecting {service_type} configurations...")
+        
+        try:
+            # Select appropriate collector
+            if service_type == 'cos':
+                collector = COSCollector(
+                    client=self.client,
+                    region=self.settings.region,
+                    logger=self.logger
+                )
+            elif service_type == 'iam':
+                collector = IAMCollector(
+                    client=self.client,
+                    region=self.settings.region,
+                    account_id=self.settings.account_id,
+                    logger=self.logger
+                )
+            elif service_type == 'vpc':
+                collector = VPCCollector(
+                    client=self.client,
+                    region=self.settings.region,
+                    logger=self.logger
+                )
+            elif service_type == 'vsi':
+                collector = VSICollector(
+                    client=self.client,
+                    region=self.settings.region,
+                    logger=self.logger
+                )
+            elif service_type == 'security':
+                collector = SecurityCollector(
+                    client=self.client,
+                    region=self.settings.region,
+                    logger=self.logger
+                )
+            else:
+                self.logger.error(f"Unknown service type: {service_type}")
+                return []
+            
+            # Collect resources
+            resources = collector.collect()
+            
+            # Save snapshot
+            if save_snapshot and resources:
+                snapshot_path = self.snapshot_manager.save_snapshot(
+                    service_type=service_type,
+                    data=resources
+                )
+                
+                # Save to database if enabled
+                if self.db_service and self.db_service.enabled:
+                    self.db_service.save_snapshot(
+                        service_type=service_type,
+                        timestamp=datetime.utcnow(),
+                        resources=resources
+                    )
+            
+            self.logger.info(f"Collected {len(resources)} {service_type} resources")
+            return resources
+            
+        except Exception as e:
+            self.logger.error(f"Error collecting {service_type}: {str(e)}", exc_info=True)
+            return []
+    
+    def detect_drift_for_service(self, service_type: str) -> Optional[Dict[str, Any]]:
+        """
+        Detect drift for a specific service type.
+        
+        Args:
+            service_type: Type of service
+            
+        Returns:
+            Drift report or None if no previous snapshot exists
+        """
+        self.logger.info(f"Detecting drift for {service_type}...")
+        
+        try:
+            # Get current and previous snapshots
+            current_snapshot = self.snapshot_manager.get_latest_snapshot(service_type)
+            previous_snapshot = self.snapshot_manager.get_previous_snapshot(service_type)
+            
+            if not current_snapshot:
+                self.logger.warning(f"No current snapshot found for {service_type}")
+                return None
+            
+            if not previous_snapshot:
+                self.logger.info(f"No previous snapshot found for {service_type} - skipping drift detection")
+                return None
+            
+            # Detect drift
+            drift_report = self.drift_detector.detect_drift(
+                service_type=service_type,
+                current_snapshot=current_snapshot,
+                previous_snapshot=previous_snapshot
+            )
+            
+            # Save drift report
+            if drift_report.get('has_drift'):
+                report_path = self.drift_detector.save_drift_report(drift_report)
+                
+                # Save to database if enabled
+                if self.db_service and self.db_service.enabled:
+                    self.db_service.save_drift_report(drift_report)
+            
+            return drift_report
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting drift for {service_type}: {str(e)}", exc_info=True)
+            return None
+    
     def collect_all(self) -> Dict[str, List[Dict[str, Any]]]:
         """
         Collect all configurations from IBM Cloud.
@@ -71,142 +233,38 @@ class IBMCloudConfigCollector:
         Returns:
             Dictionary with collected resources by type
         """
-        results = {
-            'cos': [],
-            'iam': [],
-            'vpc': [],
-            'vsi': [],
-            'security': []
-        }
+        service_types = ['cos', 'iam', 'vpc', 'vsi', 'security']
+        results = {}
         
-        try:
-            # Collect Cloud Object Storage configurations
+        for service_type in service_types:
             self.logger.info("=" * 60)
-            self.logger.info("Starting Cloud Object Storage collection...")
-            cos_collector = COSCollector(
-                client=self.client,
-                region=self.settings.region,
-                logger=self.logger
-            )
-            results['cos'] = cos_collector.collect()
-            
-            # Collect IAM configurations
-            self.logger.info("=" * 60)
-            self.logger.info("Starting IAM collection...")
-            iam_collector = IAMCollector(
-                client=self.client,
-                region=self.settings.region,
-                account_id=self.settings.account_id,
-                logger=self.logger
-            )
-            results['iam'] = iam_collector.collect()
-            
-            # Collect VPC configurations
-            self.logger.info("=" * 60)
-            self.logger.info("Starting VPC collection...")
-            vpc_collector = VPCCollector(
-                client=self.client,
-                region=self.settings.region,
-                logger=self.logger
-            )
-            results['vpc'] = vpc_collector.collect()
-            
-            # Collect Virtual Server Instance configurations
-            self.logger.info("=" * 60)
-            self.logger.info("Starting Virtual Server Instance collection...")
-            vsi_collector = VSICollector(
-                client=self.client,
-                region=self.settings.region,
-                logger=self.logger
-            )
-            results['vsi'] = vsi_collector.collect()
-            
-            # Collect Security configurations
-            self.logger.info("=" * 60)
-            self.logger.info("Starting Security configuration collection...")
-            security_collector = SecurityCollector(
-                client=self.client,
-                region=self.settings.region,
-                logger=self.logger
-            )
-            results['security'] = security_collector.collect()
-            
-        except Exception as e:
-            self.logger.error(f"Error during collection: {str(e)}", exc_info=True)
+            resources = self.collect_service(service_type, save_snapshot=True)
+            results[service_type] = resources
         
         return results
     
-    def save_results(self, results: Dict[str, List[Dict[str, Any]]]) -> Dict[str, str]:
+    def detect_all_drift(self) -> List[Dict[str, Any]]:
         """
-        Save collected results to JSON files.
+        Detect drift for all service types.
         
-        Args:
-            results: Dictionary with collected resources
-            
         Returns:
-            Dictionary with saved file paths
+            List of drift reports
         """
-        saved_files = {}
+        service_types = ['cos', 'iam', 'vpc', 'vsi', 'security']
+        drift_reports = []
         
-        try:
-            # Save individual resource type files
-            for resource_type, resources in results.items():
-                if resources:
-                    filename = f"ibm_cloud_{resource_type}"
-                    filepath = save_json(
-                        data=resources,
-                        filename=filename,
-                        output_dir=self.settings.output_dir,
-                        use_timestamp=True
-                    )
-                    saved_files[resource_type] = filepath
-                    self.logger.info(f"Saved {len(resources)} {resource_type} resources to {filepath}")
-            
-            # Save combined file with all resources
-            all_resources = []
-            for resources in results.values():
-                all_resources.extend(resources)
-            
-            if all_resources:
-                combined_filepath = save_json(
-                    data=all_resources,
-                    filename="ibm_cloud_all_resources",
-                    output_dir=self.settings.output_dir,
-                    use_timestamp=True
-                )
-                saved_files['all'] = combined_filepath
-                self.logger.info(f"Saved {len(all_resources)} total resources to {combined_filepath}")
-            
-            # Save summary
-            summary = {
-                'collection_timestamp': datetime.utcnow().isoformat() + 'Z',
-                'region': self.settings.region,
-                'resource_counts': {
-                    resource_type: len(resources)
-                    for resource_type, resources in results.items()
-                },
-                'total_resources': len(all_resources),
-                'output_files': saved_files
-            }
-            
-            summary_filepath = save_json(
-                data=summary,
-                filename="collection_summary",
-                output_dir=self.settings.output_dir,
-                use_timestamp=True
-            )
-            saved_files['summary'] = summary_filepath
-            self.logger.info(f"Saved collection summary to {summary_filepath}")
-            
-        except Exception as e:
-            self.logger.error(f"Error saving results: {str(e)}", exc_info=True)
+        for service_type in service_types:
+            self.logger.info("=" * 60)
+            drift_report = self.detect_drift_for_service(service_type)
+            if drift_report:
+                drift_reports.append(drift_report)
         
-        return saved_files
+        return drift_reports
     
-    def run(self):
-        """Run the complete collection process."""
+    def run_one_time_collection(self):
+        """Run a one-time collection and drift detection."""
         self.logger.info("=" * 60)
-        self.logger.info("IBM Cloud Configuration Collection Started")
+        self.logger.info("IBM Cloud One-Time Collection Started")
         self.logger.info("=" * 60)
         
         start_time = datetime.utcnow()
@@ -219,8 +277,21 @@ class IBMCloudConfigCollector:
         # Collect all configurations
         results = self.collect_all()
         
-        # Save results
-        saved_files = self.save_results(results)
+        # Detect drift
+        self.logger.info("=" * 60)
+        self.logger.info("Starting drift detection...")
+        drift_reports = self.detect_all_drift()
+        
+        # Generate drift summary
+        if drift_reports:
+            drift_summary = self.drift_detector.generate_drift_summary(drift_reports)
+            summary_path = save_json(
+                data=drift_summary,
+                filename="drift_summary",
+                output_dir=self.settings.drift_reports_dir,
+                use_timestamp=True
+            )
+            self.logger.info(f"Drift summary saved to {summary_path}")
         
         # Calculate duration
         end_time = datetime.utcnow()
@@ -233,21 +304,153 @@ class IBMCloudConfigCollector:
         self.logger.info(f"Duration: {duration:.2f} seconds")
         self.logger.info(f"Total resources collected: {sum(len(r) for r in results.values())}")
         self.logger.info("Resource breakdown:")
-        for resource_type, resources in results.items():
-            self.logger.info(f"  - {resource_type}: {len(resources)}")
-        self.logger.info("\nOutput files:")
-        for file_type, filepath in saved_files.items():
-            self.logger.info(f"  - {file_type}: {filepath}")
+        for service_type, resources in results.items():
+            self.logger.info(f"  - {service_type}: {len(resources)}")
+        
+        if drift_reports:
+            self.logger.info(f"\nDrift detected in {len([r for r in drift_reports if r.get('has_drift')])} services")
+            for report in drift_reports:
+                if report.get('has_drift'):
+                    summary = report.get('summary', {})
+                    self.logger.info(
+                        f"  - {report.get('service_type')}: "
+                        f"{summary.get('total_changes')} changes "
+                        f"({summary.get('added_count')} added, "
+                        f"{summary.get('removed_count')} removed, "
+                        f"{summary.get('modified_count')} modified)"
+                    )
+        
         self.logger.info("=" * 60)
+    
+    def start_monitoring(self):
+        """Start continuous monitoring mode with scheduled collections."""
+        self.logger.info("=" * 60)
+        self.logger.info("IBM Cloud Continuous Monitoring Started")
+        self.logger.info("=" * 60)
+        
+        # Test connection
+        if not self.test_connection():
+            self.logger.error("Connection test failed. Exiting.")
+            sys.exit(1)
+        
+        # Initialize scheduler
+        self.scheduler = SchedulerService(logger=self.logger)
+        
+        # Schedule collection jobs
+        self.scheduler.add_collection_job(
+            job_id='cos_collection',
+            collector_func=self._scheduled_collection,
+            interval_minutes=self.settings.cos_collection_interval,
+            service_type='cos'
+        )
+        
+        self.scheduler.add_collection_job(
+            job_id='iam_collection',
+            collector_func=self._scheduled_collection,
+            interval_minutes=self.settings.iam_collection_interval,
+            service_type='iam'
+        )
+        
+        self.scheduler.add_collection_job(
+            job_id='vpc_collection',
+            collector_func=self._scheduled_collection,
+            interval_minutes=self.settings.vpc_collection_interval,
+            service_type='vpc'
+        )
+        
+        self.scheduler.add_collection_job(
+            job_id='vsi_collection',
+            collector_func=self._scheduled_collection,
+            interval_minutes=self.settings.vsi_collection_interval,
+            service_type='vsi'
+        )
+        
+        self.scheduler.add_collection_job(
+            job_id='security_collection',
+            collector_func=self._scheduled_collection,
+            interval_minutes=self.settings.security_collection_interval,
+            service_type='security'
+        )
+        
+        # Start scheduler
+        self.scheduler.start()
+        self.monitoring_active = True
+        
+        self.logger.info("Monitoring service is running. Press Ctrl+C to stop.")
+        
+        # Keep the main thread alive
+        try:
+            while self.monitoring_active:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            self.logger.info("Received shutdown signal...")
+            self.stop_monitoring()
+    
+    def _scheduled_collection(self, service_type: str):
+        """
+        Scheduled collection job for a service type.
+        
+        Args:
+            service_type: Type of service to collect
+        """
+        try:
+            # Collect resources
+            resources = self.collect_service(service_type, save_snapshot=True)
+            
+            # Detect drift
+            drift_report = self.detect_drift_for_service(service_type)
+            
+            # Cleanup old snapshots
+            self.snapshot_manager.cleanup_old_snapshots(
+                service_type=service_type,
+                keep_count=self.settings.snapshot_retention_count
+            )
+            
+            if self.db_service and self.db_service.enabled:
+                self.db_service.cleanup_old_snapshots(
+                    service_type=service_type,
+                    keep_count=self.settings.snapshot_retention_count
+                )
+            
+        except Exception as e:
+            self.logger.error(
+                f"Error in scheduled collection for {service_type}: {str(e)}",
+                exc_info=True
+            )
+    
+    def stop_monitoring(self):
+        """Stop the monitoring service."""
+        if self.scheduler:
+            self.logger.info("Stopping scheduler...")
+            self.scheduler.stop(wait=True)
+        self.monitoring_active = False
+        self.logger.info("Monitoring service stopped")
+
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully."""
+    print("\n\nReceived shutdown signal. Stopping monitoring...")
+    sys.exit(0)
 
 
 def main():
     """Main entry point."""
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     try:
-        collector = IBMCloudConfigCollector()
-        collector.run()
+        monitor = IBMCloudMonitor()
+        
+        # Check if one-time mode is requested
+        if '--once' in sys.argv:
+            monitor.run_one_time_collection()
+        else:
+            # Default to continuous monitoring
+            monitor.start_monitoring()
+            
     except KeyboardInterrupt:
-        print("\n\nCollection interrupted by user.")
+        print("\n\nOperation interrupted by user.")
         sys.exit(0)
     except Exception as e:
         print(f"\nFatal error: {str(e)}")

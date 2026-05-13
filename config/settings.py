@@ -33,6 +33,23 @@ class Settings:
         # Output
         self.output_dir: str = os.getenv('OUTPUT_DIR', 'output')
         
+        # Monitoring and Scheduling
+        self.enable_monitoring: bool = os.getenv('ENABLE_MONITORING', 'false').lower() == 'true'
+        self.cos_collection_interval: int = int(os.getenv('COS_COLLECTION_INTERVAL', '5'))
+        self.iam_collection_interval: int = int(os.getenv('IAM_COLLECTION_INTERVAL', '15'))
+        self.vpc_collection_interval: int = int(os.getenv('VPC_COLLECTION_INTERVAL', '10'))
+        self.vsi_collection_interval: int = int(os.getenv('VSI_COLLECTION_INTERVAL', '10'))
+        self.security_collection_interval: int = int(os.getenv('SECURITY_COLLECTION_INTERVAL', '10'))
+        
+        # Snapshot Management
+        self.snapshots_dir: str = os.getenv('SNAPSHOTS_DIR', 'snapshots')
+        self.drift_reports_dir: str = os.getenv('DRIFT_REPORTS_DIR', 'drift_reports')
+        self.snapshot_retention_count: int = int(os.getenv('SNAPSHOT_RETENTION_COUNT', '10'))
+        
+        # Database (optional)
+        self.database_url: Optional[str] = os.getenv('DATABASE_URL', None)
+        self.enable_database: bool = os.getenv('ENABLE_DATABASE', 'false').lower() == 'true'
+        
     def validate(self) -> bool:
         """
         Validate that required settings are present.

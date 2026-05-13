@@ -1,317 +1,304 @@
-# IBM Cloud Configuration Collector
-
-A Python-based tool that connects to IBM Cloud and fetches infrastructure configuration details, storing the collected data as structured JSON files.
+A comprehensive Python-based system for monitoring IBM Cloud infrastructure configurations and detecting configuration drift over time.
 
 ## Features
 
-- **Comprehensive Data Collection**: Collects configurations from multiple IBM Cloud services:
-  - Cloud Object Storage (COS) buckets and configurations
-  - IAM users, service IDs, access groups, and policies
-  - VPC and networking configurations (VPCs, subnets, gateways, floating IPs, load balancers)
-  - Virtual Server Instances (VSI) with detailed configurations
-  - Security groups and network ACLs with firewall rules
+### Core Capabilities
+- **Multi-Service Collection**: Collects configurations from COS, IAM, VPC, VSI, and Security services
+- **Scheduled Monitoring**: Continuous monitoring with configurable collection intervals
+- **Drift Detection**: Automatic detection of infrastructure configuration changes
+- **Snapshot Management**: Timestamped storage of configuration snapshots
+- **Drift Reporting**: Detailed reports of detected changes
+- **Database Persistence**: Optional PostgreSQL storage for snapshots and drift history
+- **Modular Architecture**: Extensible design for future enhancements
 
-- **Normalized JSON Output**: All collected data is normalized into a consistent JSON schema
-- **Timestamped Files**: Outputs are saved with timestamps for historical tracking
-- **Production-Ready**: Includes proper error handling, logging, and modular architecture
-- **Extensible**: Clean modular structure allows easy addition of new collectors
+### Drift Detection
+The system detects three types of changes:
+- **Added Resources**: New resources that didn't exist in previous snapshot
+- **Removed Resources**: Resources that existed before but are now gone
+- **Modified Resources**: Resources with configuration changes
 
-## Project Structure
+## Architecture
 
 ```
-config_fetch/
-├── config/                 # Configuration management
-│   ├── __init__.py
-│   └── settings.py        # Environment variable handling
-├── collectors/            # Resource collectors
-│   ├── __init__.py
-│   ├── base_collector.py  # Base collector class
-│   ├── cos_collector.py   # Cloud Object Storage
-│   ├── iam_collector.py   # IAM configurations
-│   ├── vpc_collector.py   # VPC and networking
-│   ├── vsi_collector.py   # Virtual Server Instances
-│   └── security_collector.py  # Security groups & ACLs
-├── services/              # IBM Cloud service clients
-│   ├── __init__.py
-│   └── ibm_cloud_client.py
-├── utils/                 # Utility functions
-│   ├── __init__.py
-│   ├── logger.py          # Logging setup
-│   └── json_handler.py    # JSON operations
-├── output/                # Output directory (created automatically)
-├── logs/                  # Log files (created automatically)
-├── main.py               # Main application entry point
-├── requirements.txt      # Python dependencies
-├── .env.example         # Example environment variables
-└── README.md            # This file
+project/
+├── collectors/          # Service-specific collectors
+│   ├── cos_collector.py
+│   ├── iam_collector.py
+│   ├── vpc_collector.py
+│   ├── vsi_collector.py
+│   └── security_collector.py
+├── services/           # Core services
+│   ├── ibm_cloud_client.py      # IBM Cloud API client
+│   ├── snapshot_manager.py      # Snapshot storage/retrieval
+│   ├── drift_detector.py        # Drift detection engine
+│   ├── scheduler_service.py     # Job scheduling
+│   └── database_service.py      # Optional DB persistence
+├── config/             # Configuration management
+├── utils/              # Utility functions
+├── snapshots/          # Configuration snapshots
+│   ├── cos/
+│   ├── iam/
+│   ├── vpc/
+│   ├── vsi/
+│   └── security/
+├── drift_reports/      # Drift detection reports
+├── logs/               # Application logs
+└── main.py            # Main application entry point
 ```
-
-## Prerequisites
-
-- Python 3.8 or higher
-- IBM Cloud account with appropriate permissions
-- IBM Cloud API key
-- IBM Cloud Account ID
 
 ## Installation
 
-1. **Clone or download this project**
+### Prerequisites
+- Python 3.8 or higher
+- IBM Cloud account with API key
+- (Optional) PostgreSQL database for persistence
 
-2. **Create a virtual environment** (recommended):
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+### Setup
 
-3. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+1. **Clone the repository**
+```bash
+git clone <repository-url>
+cd IBMCloud-Config-fetch
+```
 
-4. **Configure environment variables**:
-   ```bash
-   cp .env.example .env
-   ```
-   
-   Edit `.env` and fill in your IBM Cloud credentials:
-   ```env
-   IBM_CLOUD_API_KEY=your_api_key_here
-   IBM_CLOUD_ACCOUNT_ID=your_account_id_here
-   IBM_CLOUD_REGION=us-south
-   
-   # Optional: Cloud Object Storage (if collecting COS data)
-   IBM_COS_ENDPOINT=https://s3.us-south.cloud-object-storage.appdomain.cloud
-   IBM_COS_API_KEY=your_cos_api_key_here
-   IBM_COS_INSTANCE_CRN=your_cos_instance_crn_here
-   ```
+2. **Create virtual environment**
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. **Install dependencies**
+```bash
+pip install -r requirements.txt
+```
+
+4. **Configure environment variables**
+```bash
+cp .env.example .env
+# Edit .env with your IBM Cloud credentials
+```
 
 ## Configuration
 
 ### Required Environment Variables
 
-- `IBM_CLOUD_API_KEY`: Your IBM Cloud API key
-- `IBM_CLOUD_ACCOUNT_ID`: Your IBM Cloud account ID
-- `IBM_CLOUD_REGION`: IBM Cloud region (default: us-south)
+```bash
+# IBM Cloud Credentials
+IBM_CLOUD_API_KEY=your_api_key_here
+IBM_CLOUD_ACCOUNT_ID=your_account_id_here
+IBM_CLOUD_REGION=us-south
 
-### Optional Environment Variables
+# Cloud Object Storage (if using COS)
+IBM_COS_ENDPOINT=https://s3.us-south.cloud-object-storage.appdomain.cloud
+IBM_COS_API_KEY=your_cos_api_key_here
+IBM_COS_INSTANCE_CRN=your_cos_instance_crn_here
+```
 
-- `IBM_COS_ENDPOINT`: Cloud Object Storage endpoint URL
-- `IBM_COS_API_KEY`: Cloud Object Storage API key
-- `IBM_COS_INSTANCE_CRN`: Cloud Object Storage instance CRN
-- `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-- `LOG_FILE`: Path to log file (default: logs/ibm_cloud_collector.log)
-- `OUTPUT_DIR`: Output directory for JSON files (default: output)
+### Optional Configuration
 
-### Getting IBM Cloud Credentials
+```bash
+# Monitoring Mode
+ENABLE_MONITORING=false  # Set to true for continuous monitoring
 
-**📖 For detailed step-by-step instructions with screenshots, see [docs/IBM_CLOUD_CREDENTIALS_GUIDE.md](docs/IBM_CLOUD_CREDENTIALS_GUIDE.md)**
+# Collection Intervals (minutes)
+COS_COLLECTION_INTERVAL=5
+IAM_COLLECTION_INTERVAL=15
+VPC_COLLECTION_INTERVAL=10
+VSI_COLLECTION_INTERVAL=10
+SECURITY_COLLECTION_INTERVAL=10
 
-#### Quick Reference:
+# Snapshot Management
+SNAPSHOTS_DIR=snapshots
+DRIFT_REPORTS_DIR=drift_reports
+SNAPSHOT_RETENTION_COUNT=10
 
-1. **API Key**:
-   - Go to IBM Cloud Console → Manage → Access (IAM) → API keys
-   - Create a new API key or use an existing one
-
-2. **Account ID**:
-   - Go to IBM Cloud Console → Manage → Account
-   - Copy your Account ID from the account settings
-
-3. **COS Credentials** (optional - only if collecting COS data):
-   - Go to your COS instance → Service credentials
-   - Create new credentials or use existing ones
-   - Copy the API key and instance CRN
-   - Determine your endpoint: `https://s3.{region}.cloud-object-storage.appdomain.cloud`
-   
-   **Common COS Endpoints**:
-   - US South: `https://s3.us-south.cloud-object-storage.appdomain.cloud`
-   - US East: `https://s3.us-east.cloud-object-storage.appdomain.cloud`
-   - EU Germany: `https://s3.eu-de.cloud-object-storage.appdomain.cloud`
-   - EU UK: `https://s3.eu-gb.cloud-object-storage.appdomain.cloud`
+# Database (Optional)
+ENABLE_DATABASE=false
+DATABASE_URL=postgresql://user:pass@localhost:5432/ibm_cloud_monitor
+```
 
 ## Usage
 
-### Basic Usage
+### Continuous Monitoring Mode (Default)
 
-Run the collector:
+Start the monitoring service:
+
 ```bash
 python main.py
 ```
 
-Or make it executable:
+The monitoring service will:
+1. Run continuously as a background service
+2. Collect configurations at scheduled intervals
+3. Automatically detect drift after each collection
+4. Generate drift reports for changes
+5. Clean up old snapshots based on retention policy
+
+To stop monitoring, press `Ctrl+C`.
+
+### One-Time Collection Mode
+
+Run a single collection and drift detection:
+
 ```bash
-chmod +x main.py
-./main.py
+python main.py --once
 ```
 
-### What Happens During Execution
+This will:
+1. Collect current configurations from all services
+2. Save snapshots with timestamps
+3. Compare with previous snapshots (if available)
+4. Generate drift reports for any detected changes
+5. Exit after completion
 
-1. **Connection Test**: Verifies connectivity to IBM Cloud
-2. **Data Collection**: Collects configurations from all enabled services
-3. **Data Normalization**: Converts all data to consistent JSON format
-4. **File Output**: Saves timestamped JSON files to the output directory
-5. **Summary Report**: Displays collection statistics and file locations
+## Output Structure
 
-### Output Files
+### Snapshots
 
-The tool generates the following files in the `output/` directory:
+Snapshots are stored in timestamped JSON files:
 
-- `ibm_cloud_cos_YYYYMMDD_HHMMSS.json` - Cloud Object Storage configurations
-- `ibm_cloud_iam_YYYYMMDD_HHMMSS.json` - IAM configurations
-- `ibm_cloud_vpc_YYYYMMDD_HHMMSS.json` - VPC and networking configurations
-- `ibm_cloud_vsi_YYYYMMDD_HHMMSS.json` - Virtual Server Instance configurations
-- `ibm_cloud_security_YYYYMMDD_HHMMSS.json` - Security group and ACL configurations
-- `ibm_cloud_all_resources_YYYYMMDD_HHMMSS.json` - Combined file with all resources
-- `collection_summary_YYYYMMDD_HHMMSS.json` - Collection summary and statistics
+```
+snapshots/
+├── cos/
+│   ├── 2026-05-13T14-00-00.json
+│   └── 2026-05-13T14-05-00.json
+├── iam/
+│   ├── 2026-05-13T14-00-00.json
+│   └── 2026-05-13T14-15-00.json
+└── vpc/
+    ├── 2026-05-13T14-00-00.json
+    └── 2026-05-13T14-10-00.json
+```
 
-## JSON Output Format
-
-All resources follow this normalized schema:
-
+Each snapshot contains:
 ```json
 {
-  "resource_id": "unique-resource-identifier",
-  "resource_type": "virtual_server",
-  "provider": "ibm_cloud",
-  "region": "us-south",
-  "configuration": {
-    "name": "my-instance",
-    "status": "running",
-    "public_access": true,
-    "encryption_enabled": false,
-    ...
+  "timestamp": "2026-05-13T14:00:00Z",
+  "service_type": "cos",
+  "resource_count": 5,
+  "resources": [...]
+}
+```
+
+### Drift Reports
+
+Drift reports are generated when changes are detected:
+
+```
+drift_reports/
+├── cos_drift_2026-05-13T14-05-00.json
+├── iam_drift_2026-05-13T14-15-00.json
+└── drift_summary_20260513_140500.json
+```
+
+Example drift report:
+```json
+{
+  "service_type": "cos",
+  "detection_timestamp": "2026-05-13T14:05:00Z",
+  "has_drift": true,
+  "summary": {
+    "total_changes": 3,
+    "added_count": 1,
+    "removed_count": 0,
+    "modified_count": 2
   },
-  "timestamp": "2026-05-13T12:00:00Z",
-  "tags": {
-    "environment": "production"
-  },
-  "metadata": {
-    "created_at": "2026-01-01T00:00:00Z"
+  "changes": {
+    "added": [...],
+    "removed": [...],
+    "modified": [
+      {
+        "resource_id": "bucket-123",
+        "resource_type": "cos_bucket",
+        "change_type": "modified",
+        "changes": {
+          "values_changed": {
+            "configuration.public_access": {
+              "old": false,
+              "new": true
+            }
+          }
+        }
+      }
+    ]
   }
 }
 ```
 
+## Database Persistence (Optional)
+
+Enable PostgreSQL persistence for long-term storage:
+
+1. **Setup PostgreSQL database**
+```sql
+CREATE DATABASE ibm_cloud_monitor;
+```
+
+2. **Configure environment**
+```bash
+ENABLE_DATABASE=true
+DATABASE_URL=postgresql://username:password@localhost:5432/ibm_cloud_monitor
+```
+
+3. **Run the application**
+
+The system will automatically:
+- Create required tables
+- Store snapshots in the database
+- Store drift reports in the database
+- Maintain both file-based and database storage
+
 ## Logging
 
-Logs are written to both console and file (default: `logs/ibm_cloud_collector.log`).
+Logs are written to:
+- Console (stdout)
+- Log file: `logs/ibm_cloud_collector.log`
 
-Log levels can be configured via the `LOG_LEVEL` environment variable:
-- `DEBUG`: Detailed information for debugging
-- `INFO`: General informational messages (default)
-- `WARNING`: Warning messages
-- `ERROR`: Error messages
-- `CRITICAL`: Critical errors
+Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
 
-## Error Handling
+Configure via `LOG_LEVEL` environment variable.
 
-The tool includes comprehensive error handling:
-- Connection failures are caught and logged
-- Individual resource collection errors don't stop the entire process
-- Detailed error messages with stack traces in log files
-- Graceful handling of missing permissions or unavailable services
+## Drift Detection Details
 
-## Extending the Collector
+The drift detector uses DeepDiff to compare snapshots and identifies:
 
-### Adding a New Collector
+### Added Resources
+Resources present in current snapshot but not in previous snapshot.
 
-1. Create a new collector in `collectors/` directory:
-   ```python
-   from collectors.base_collector import BaseCollector
-   
-   class MyCollector(BaseCollector):
-       def collect(self):
-           resources = []
-           # Your collection logic here
-           return resources
-   ```
+### Removed Resources
+Resources present in previous snapshot but not in current snapshot.
 
-2. Import and use in `main.py`:
-   ```python
-   from collectors import MyCollector
-   
-   my_collector = MyCollector(client, region, logger)
-   results['my_resource'] = my_collector.collect()
-   ```
+### Modified Resources
+Resources present in both snapshots with configuration changes:
+- **Value Changes**: Field values that changed
+- **Type Changes**: Field types that changed
+- **Items Added**: New fields added to configuration
+- **Items Removed**: Fields removed from configuration
+- **List Changes**: Items added/removed from lists
 
-### Adding New IBM Cloud Services
+## Extensibility
 
-1. Add service client property in `services/ibm_cloud_client.py`
-2. Create corresponding collector in `collectors/`
-3. Update `main.py` to include the new collector
+The system is designed for future enhancements:
 
-## Troubleshooting
+### Planned Features
+- **Compliance Evaluation Layer**: Assess drift against compliance policies
+- **AI-Powered Analysis**: Intelligent drift categorization and recommendations
+- **Automated Remediation**: Automatic correction of unauthorized changes
+- **Alert Integration**: Notifications via email, Slack, PagerDuty
+- **Web Dashboard**: Real-time monitoring interface
+- **Multi-Cloud Support**: Extend to AWS, Azure, GCP
 
-### Common Issues
+### Adding New Collectors
 
-1. **Authentication Errors**
-   - Verify your API key is correct
-   - Check that the API key has necessary permissions
-   - Ensure account ID matches the API key's account
+1. Create a new collector in `collectors/`:
+```python
+from collectors.base_collector import BaseCollector
 
-2. **Connection Timeouts**
-   - Check your internet connection
-   - Verify the region is correct
-   - Try a different IBM Cloud region
+class NewServiceCollector(BaseCollector):
+    def collect(self):
+        # Implementation
+        pass
+```
 
-3. **Missing Resources**
-   - Ensure you have resources in the specified region
-   - Check IAM permissions for the API key
-   - Review logs for specific error messages
-
-4. **Import Errors**
-   - Ensure all dependencies are installed: `pip install -r requirements.txt`
-   - Verify you're using Python 3.8 or higher
-
-## Security Best Practices
-
-- Never commit `.env` file to version control
-- Use API keys with minimal required permissions
-- Rotate API keys regularly
-- Store credentials securely
-- Review collected data before sharing
-
-## Performance Considerations
-
-- Collection time depends on the number of resources
-- Large accounts may take several minutes
-- Consider running during off-peak hours for large collections
-- Use appropriate log levels to reduce I/O overhead
-
-## Future Enhancements
-
-Potential areas for extension:
-- Compliance evaluation modules
-- Resource comparison and drift detection
-- Automated remediation suggestions
-- Integration with CI/CD pipelines
-- Support for multiple regions in single run
-- Export to other formats (CSV, Excel, etc.)
-- Real-time monitoring and alerting
-
-## License
-
-This project is provided as-is for educational and operational purposes.
-
-## Support
-
-For issues or questions:
-1. Check the logs in `logs/` directory
-2. Review error messages in console output
-3. Verify environment configuration
-4. Consult IBM Cloud documentation for service-specific issues
-
-## Contributing
-
-To contribute:
-1. Follow the existing code structure
-2. Add appropriate error handling
-3. Include logging statements
-4. Update documentation
-5. Test with various IBM Cloud configurations
-
-## Acknowledgments
-
-Built using official IBM Cloud SDKs:
-- ibm-cloud-sdk-core
-- ibm-cos-sdk
-- ibm-platform-services
-- ibm-vpc
+2. Register in `main.py`
+3. Add scheduling configuration
