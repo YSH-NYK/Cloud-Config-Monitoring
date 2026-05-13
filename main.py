@@ -160,17 +160,19 @@ class IBMCloudMonitor:
             
             # Save snapshot
             if save_snapshot and resources:
-                snapshot_path = self.snapshot_manager.save_snapshot(
-                    service_type=service_type,
-                    data=resources
-                )
-                
                 # Save to database if enabled
                 if self.db_service and self.db_service.enabled:
                     self.db_service.save_snapshot(
                         service_type=service_type,
                         timestamp=datetime.utcnow(),
                         resources=resources
+                    )
+                    self.logger.info(f"Saved {len(resources)} {service_type} resources to database")
+                else:
+                    # Fallback to JSON only if database is not enabled
+                    snapshot_path = self.snapshot_manager.save_snapshot(
+                        service_type=service_type,
+                        data=resources
                     )
             
             self.logger.info(f"Collected {len(resources)} {service_type} resources")
@@ -193,9 +195,17 @@ class IBMCloudMonitor:
         self.logger.info(f"Detecting drift for {service_type}...")
         
         try:
-            # Get current and previous snapshots
-            current_snapshot = self.snapshot_manager.get_latest_snapshot(service_type)
-            previous_snapshot = self.snapshot_manager.get_previous_snapshot(service_type)
+            # Get current and previous snapshots from database or JSON
+            if self.db_service and self.db_service.enabled:
+                # Get from database
+                current_snapshot = self.db_service.get_latest_snapshot(service_type)
+                # For previous, we need to get the second-to-last snapshot
+                # We'll use the snapshot manager's logic but adapt it
+                previous_snapshot = self._get_previous_snapshot_from_db(service_type)
+            else:
+                # Fallback to JSON files
+                current_snapshot = self.snapshot_manager.get_latest_snapshot(service_type)
+                previous_snapshot = self.snapshot_manager.get_previous_snapshot(service_type)
             
             if not current_snapshot:
                 self.logger.warning(f"No current snapshot found for {service_type}")
@@ -214,17 +224,63 @@ class IBMCloudMonitor:
             
             # Save drift report
             if drift_report.get('has_drift'):
-                report_path = self.drift_detector.save_drift_report(drift_report)
-                
                 # Save to database if enabled
                 if self.db_service and self.db_service.enabled:
                     self.db_service.save_drift_report(drift_report)
+                    self.logger.info(f"Saved {service_type} drift report to database")
+                else:
+                    # Fallback to JSON only if database is not enabled
+                    report_path = self.drift_detector.save_drift_report(drift_report)
             
             return drift_report
             
         except Exception as e:
             self.logger.error(f"Error detecting drift for {service_type}: {str(e)}", exc_info=True)
             return None
+    
+    def _get_previous_snapshot_from_db(self, service_type: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the second-to-last snapshot from database.
+        
+        Args:
+            service_type: Type of service
+            
+        Returns:
+            Previous snapshot or None
+        """
+        if not self.db_service or not self.db_service.enabled:
+            return None
+        
+        session = self.db_service.get_session()
+        if not session:
+            return None
+        
+        try:
+            from services.database_service import Snapshot
+            
+            # Get the second most recent snapshot
+            snapshots = session.query(Snapshot)\
+                .filter(Snapshot.service_type == service_type)\
+                .order_by(Snapshot.timestamp.desc())\
+                .limit(2)\
+                .all()
+            
+            if len(snapshots) < 2:
+                return None
+            
+            previous = snapshots[1]
+            return {
+                'timestamp': previous.timestamp.isoformat() + 'Z',
+                'service_type': previous.service_type,
+                'resource_count': previous.resource_count,
+                'resources': previous.resources
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error getting previous snapshot from database: {str(e)}")
+            return None
+        finally:
+            session.close()
     
     def collect_all(self) -> Dict[str, List[Dict[str, Any]]]:
         """
